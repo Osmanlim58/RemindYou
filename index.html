@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RemindYou</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-4">
+    <div id="root" class="max-w-4xl mx-auto"></div>
+    <script>
+        let assets = JSON.parse(localStorage.getItem('assets') || '[{"id":1,"name":"Gabelstapler","status":"orange","date":"2026-04-15","pruefart":"TÜV","pruefer":"Klaus"},{"id":2,"name":"Feuerlöscher","status":"red","date":"2025-03-01","pruefart":"Brandschutz","pruefer":"Max"}]');
+        
+        function save() { localStorage.setItem('assets', JSON.stringify(assets)); }
+        
+        function render() {
+            let red = assets.filter(a=>a.status==='red').length;
+            let orange = assets.filter(a=>a.status==='orange').length;
+            let green = assets.filter(a=>a.status==='green').length;
+            
+            document.getElementById('root').innerHTML = `
+                <h1 class="text-3xl font-bold text-green-600">💡✓ RemindYou</h1>
+                <p class="text-gray-500 mb-4">Deine Fristen im Fokus</p>
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    <div class="bg-red-100 p-3 rounded text-center"><b>${red}</b><br>Überfällig</div>
+                    <div class="bg-orange-100 p-3 rounded text-center"><b>${orange}</b><br>Bald fällig</div>
+                    <div class="bg-green-100 p-3 rounded text-center"><b>${green}</b><br>In Ordnung</div>
+                </div>
+                <button onclick="neu()" class="bg-green-600 text-white px-4 py-2 rounded mb-3">+ Neues Gerät</button>
+                <div class="bg-white rounded shadow">
+                    <table class="w-full">
+                        <tr class="bg-gray-200"><th class="p-2">Gerät</th><th>Status</th><th>Prüfart</th><th>Prüfer</th></tr>
+                        ${assets.map(a => `<tr><td class="p-2">${a.name}</td><td class="${a.status==='red'?'text-red-600':a.status==='orange'?'text-orange-600':'text-green-600'}">${a.status}</td><td>${a.pruefart}</td><td>${a.pruefer}</td></tr>`).join('')}
+                    </table>
+                </div>
+                <div class="text-center text-sm text-gray-400 mt-4">Login: cguler23@gmail.com / Remindly2026!</div>
+            `;
+        }
+        
+        window.neu = () => {
+            let name = prompt("Geräte Name:");
+            if(name) {
+                assets.push({id:Date.now(), name, status:"green", date:"2026-12-31", pruefart:"Neu", pruefer:"Admin"});
+                save();
+                render();
+            }
+        };
+        
+        render();
+    </script>
+</body>
+</html>
