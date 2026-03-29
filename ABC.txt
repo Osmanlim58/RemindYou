@@ -2,281 +2,59 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>RemindYou - Deine Fristen im Fokus</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RemindYou - Fristen im Fokus</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="manifest" href="manifest.json">
-    <style>
-        .dark { background-color: #1a1a2e; color: #eee; }
-        .dark .card { background-color: #16213e; }
-        .status-red { background-color: #dc2626; }
-        .status-orange { background-color: #f97316; }
-        .status-green { background-color: #22c55e; }
-    </style>
 </head>
-<body class="bg-gray-100 dark:bg-gray-900 transition-colors">
-    <div id="root"></div>
-
+<body class="bg-gray-100">
+    <div id="root" class="p-4 max-w-4xl mx-auto"></div>
     <script>
-        // ========== KOMPLETTE APP ==========
-        // Dashboard mit Ampelkarten, Geräteliste, Foto-Upload, QR-Codes, Abo-Modell
-        
-        let currentUser = null;
-        let currentTheme = localStorage.getItem('theme') || 'light';
-        let currentFilter = 'all';
+        let user = null;
         let assets = JSON.parse(localStorage.getItem('assets') || '[]');
-        let users = JSON.parse(localStorage.getItem('users') || '[]');
-        let currentPlan = localStorage.getItem('plan') || 'trial';
-        let trialEnd = localStorage.getItem('trialEnd') || null;
-
-        // Admin Standard
-        if (users.length === 0) {
-            users.push({ email: 'cguler23@gmail.com', password: 'Remindly2026!', role: 'admin', plan: 'enterprise' });
-            localStorage.setItem('users', JSON.stringify(users));
-        }
-
-        // Beispiel-Geräte
+        
+        // Demo-Admin
         if (assets.length === 0) {
             assets = [
-                { id: '1', name: 'Nassschrubautomat', category: 'Elektro & Werkzeug', pruefart: 'DGUV V3', intervall: 12, letztePruefung: '2025-04-01', naechstesDatum: '2026-04-01', standort: 'Lager 1', pruefer: 'Klaus Prüfer', foto: null },
-                { id: '2', name: 'Gabelstapler B-12', category: 'Transport & Flotte', pruefart: 'TÜV', intervall: 12, letztePruefung: '2025-03-15', naechstesDatum: '2026-03-15', standort: 'Halle A', pruefer: 'Klaus Prüfer', foto: null },
-                { id: '3', name: 'Feuerlöscher', category: 'Gebäude & Sicherheit', pruefart: 'Brandschutz', intervall: 12, letztePruefung: '2024-06-01', naechstesDatum: '2025-06-01', standort: 'Flur EG', pruefer: 'Max Mustermann', foto: null }
+                { id: 1, name: "Gabelstapler B12", status: "orange", date: "2026-04-15", pruefart: "TÜV", pruefer: "Klaus" },
+                { id: 2, name: "Feuerlöscher", status: "red", date: "2025-03-01", pruefart: "Brandschutz", pruefer: "Max" }
             ];
-            localStorage.setItem('assets', JSON.stringify(assets));
         }
 
-        function getStatus(naechstesDatum) {
-            const today = new Date();
-            const next = new Date(naechstesDatum);
-            const diff = Math.ceil((next - today) / (1000 * 60 * 60 * 24));
-            if (diff < 0) return 'red';
-            if (diff <= 14) return 'orange';
-            return 'green';
-        }
-
+        function save() { localStorage.setItem('assets', JSON.stringify(assets)); }
+        
         function render() {
-            const root = document.getElementById('root');
-            if (!currentUser) {
-                root.innerHTML = renderLogin();
-                return;
-            }
-            root.innerHTML = renderDashboard();
-            attachEventListeners();
-        }
-
-        function renderLogin() {
-            return `
-                <div class="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 w-full max-w-md">
-                        <div class="text-center mb-6">
-                            <div class="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-3">
-                                <span class="text-4xl">💡✓</span>
-                            </div>
-                            <h1 class="text-3xl font-bold text-gray-800 dark:text-white">RemindYou</h1>
-                            <p class="text-gray-500 dark:text-gray-400">Deine Fristen im Fokus</p>
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-gray-700 dark:text-gray-300 mb-2">E-Mail Adresse</label>
-                            <input type="email" id="loginEmail" class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600" placeholder="name@firma.de" value="cguler23@gmail.com">
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-gray-700 dark:text-gray-300 mb-2">Passwort</label>
-                            <input type="password" id="loginPassword" class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600" placeholder="********">
-                            <div class="text-right mt-1">
-                                <button onclick="togglePassword()" class="text-sm text-green-600">Passwort anzeigen</button>
-                            </div>
-                        </div>
-                        <button onclick="login()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition">Anmelden</button>
-                        <div class="text-center mt-4">
-                            <button onclick="showRegister()" class="text-green-600">Neu hier? Jetzt registrieren</button>
-                        </div>
-                        <div class="mt-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg text-xs text-gray-500">
-                            Demo: cguler23@gmail.com / Remindly2026!
-                        </div>
-                    </div>
+            const html = `
+                <h1 class="text-3xl font-bold text-green-600">💡✓ RemindYou</h1>
+                <p class="text-gray-500 mb-4">Deine Fristen im Fokus</p>
+                
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    <div class="bg-red-100 p-3 rounded text-center"><b>${assets.filter(a=>a.status==='red').length}</b><br>Überfällig</div>
+                    <div class="bg-orange-100 p-3 rounded text-center"><b>${assets.filter(a=>a.status==='orange').length}</b><br>Bald fällig</div>
+                    <div class="bg-green-100 p-3 rounded text-center"><b>${assets.filter(a=>a.status==='green').length}</b><br>In Ordnung</div>
                 </div>
-            `;
-        }
-
-        function renderDashboard() {
-            const redCount = assets.filter(a => getStatus(a.naechstesDatum) === 'red').length;
-            const orangeCount = assets.filter(a => getStatus(a.naechstesDatum) === 'orange').length;
-            const greenCount = assets.filter(a => getStatus(a.naechstesDatum) === 'green').length;
-            
-            let filteredAssets = assets;
-            if (currentFilter === 'red') filteredAssets = assets.filter(a => getStatus(a.naechstesDatum) === 'red');
-            else if (currentFilter === 'orange') filteredAssets = assets.filter(a => getStatus(a.naechstesDatum) === 'orange');
-            else if (currentFilter === 'green') filteredAssets = assets.filter(a => getStatus(a.naechstesDatum) === 'green');
-            
-            return `
-                <div class="min-h-screen bg-gray-100 dark:bg-gray-900 p-4">
-                    <div class="max-w-6xl mx-auto">
-                        <!-- Header -->
-                        <div class="flex justify-between items-center mb-6">
-                            <div>
-                                <h1 class="text-3xl font-bold text-gray-800 dark:text-white">RemindYou</h1>
-                                <p class="text-gray-500 dark:text-gray-400">Deine Fristen im Fokus</p>
-                            </div>
-                            <div class="flex gap-2">
-                                <button onclick="toggleTheme()" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700">${currentTheme === 'dark' ? '☀️' : '🌙'}</button>
-                                <button onclick="logout()" class="p-2 rounded-lg bg-red-500 text-white">Logout</button>
-                            </div>
-                        </div>
-                        
-                        <!-- Ampelkarten -->
-                        <div class="grid grid-cols-3 gap-4 mb-6">
-                            <div onclick="setFilter('red')" class="bg-red-100 dark:bg-red-900/30 p-4 rounded-xl text-center cursor-pointer hover:scale-105 transition">
-                                <div class="text-3xl font-bold text-red-600">${redCount}</div>
-                                <div class="text-red-600 font-semibold">Überfällig</div>
-                            </div>
-                            <div onclick="setFilter('orange')" class="bg-orange-100 dark:bg-orange-900/30 p-4 rounded-xl text-center cursor-pointer hover:scale-105 transition">
-                                <div class="text-3xl font-bold text-orange-600">${orangeCount}</div>
-                                <div class="text-orange-600 font-semibold">Bald fällig</div>
-                            </div>
-                            <div onclick="setFilter('green')" class="bg-green-100 dark:bg-green-900/30 p-4 rounded-xl text-center cursor-pointer hover:scale-105 transition">
-                                <div class="text-3xl font-bold text-green-600">${greenCount}</div>
-                                <div class="text-green-600 font-semibold">In Ordnung</div>
-                            </div>
-                        </div>
-                        
-                        <!-- Suchleiste + Neues Gerät -->
-                        <div class="flex gap-2 mb-4">
-                            <input type="text" id="searchInput" placeholder="Gerät suchen..." class="flex-1 px-4 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700">
-                            <button onclick="openNewAssetModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg">+ Neues Gerät</button>
-                        </div>
-                        
-                        <!-- Geräteliste -->
-                        <div class="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
-                            <div class="overflow-x-auto">
-                                <table class="w-full">
-                                    <thead class="bg-gray-50 dark:bg-gray-700">
-                                        <tr>
-                                            <th class="px-4 py-2 text-left">Gerät</th>
-                                            <th class="px-4 py-2 text-left">Status</th>
-                                            <th class="px-4 py-2 text-left">Nächstes Datum</th>
-                                            <th class="px-4 py-2 text-left">Prüfart</th>
-                                            <th class="px-4 py-2 text-left">Standort</th>
-                                            <th class="px-4 py-2 text-left">Prüfer</th>
-                                            <th class="px-4 py-2 text-left">Foto</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${filteredAssets.map(asset => {
-                                            const status = getStatus(asset.naechstesDatum);
-                                            const statusText = status === 'red' ? '🔴 Dringend' : status === 'orange' ? '🟠 Bald fällig' : '🟢 Ok';
-                                            const statusClass = status === 'red' ? 'text-red-600' : status === 'orange' ? 'text-orange-600' : 'text-green-600';
-                                            return `
-                                                <tr class="border-t dark:border-gray-700">
-                                                    <td class="px-4 py-2">${asset.name}</td>
-                                                    <td class="px-4 py-2 ${statusClass} font-semibold">${statusText}</td>
-                                                    <td class="px-4 py-2">${asset.naechstesDatum}</td>
-                                                    <td class="px-4 py-2">${asset.pruefart}</td>
-                                                    <td class="px-4 py-2">${asset.standort || '-'}</td>
-                                                    <td class="px-4 py-2">${asset.pruefer || '-'}</td>
-                                                    <td class="px-4 py-2">
-                                                        ${asset.foto ? `<img src="${asset.foto}" class="w-10 h-10 rounded object-cover cursor-pointer" onclick="showFullImage('${asset.foto}')">` : '<button onclick="addPhoto(\'' + asset.id + '\')" class="text-blue-500">📷 Foto</button>'}
-                                                    </td>
-                                                </tr>
-                                            `;
-                                        }).join('')}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        
-                        <!-- Abo-Hinweis -->
-                        <div class="mt-4 p-3 bg-gray-200 dark:bg-gray-800 rounded-lg text-center text-sm">
-                            ${currentPlan === 'trial' ? `🔔 Testzeitraum: noch ${Math.max(0, Math.ceil((new Date(trialEnd) - new Date()) / (1000*60*60*24)))} Tage` : `📦 Aktueller Plan: ${currentPlan === 'basic' ? 'Basis (49€/Monat)' : currentPlan === 'professional' ? 'Professional (99€/Monat)' : 'Enterprise (150€/Monat)'}`}
-                            <button onclick="showPlans()" class="ml-2 text-green-600">Plan ändern</button>
-                        </div>
-                    </div>
+                
+                <button onclick="newAsset()" class="bg-green-600 text-white px-4 py-2 rounded mb-3">+ Neues Gerät</button>
+                
+                <div class="bg-white rounded shadow">
+                    <table class="w-full">
+                        <tr class="bg-gray-200"><th class="p-2">Gerät</th><th>Status</th><th>Prüfart</th><th>Prüfer</th></tr>
+                        ${assets.map(a => `<tr class="border-t"><td class="p-2">${a.name}</td><td class="${a.status==='red'?'text-red-600':a.status==='orange'?'text-orange-600':'text-green-600'}">${a.status}</td><td>${a.pruefart}</td><td>${a.pruefer}</td></tr>`).join('')}
+                    </table>
                 </div>
+                <div class="text-center text-sm text-gray-400 mt-4">Demo: cguler23@gmail.com / Remindly2026!</div>
             `;
+            document.getElementById('root').innerHTML = html;
         }
-
-        window.setFilter = (filter) => { currentFilter = filter; render(); };
-        window.toggleTheme = () => { currentTheme = currentTheme === 'dark' ? 'light' : 'dark'; document.body.classList.toggle('dark'); localStorage.setItem('theme', currentTheme); render(); };
-        window.logout = () => { currentUser = null; render(); };
         
-        window.login = () => {
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            const user = users.find(u => u.email === email && u.password === password);
-            if (user) {
-                currentUser = user;
-                currentPlan = user.plan || 'trial';
-                if (currentPlan === 'trial' && !trialEnd) {
-                    trialEnd = new Date(Date.now() + 3*24*60*60*1000).toISOString();
-                    localStorage.setItem('trialEnd', trialEnd);
-                }
+        window.newAsset = () => {
+            let name = prompt("Geräte Name:");
+            if(name) {
+                assets.push({ id: Date.now(), name, status: "green", date: "2026-12-31", pruefart: "Neu", pruefer: "Admin" });
+                save();
                 render();
-            } else {
-                alert('E-Mail oder Passwort ungültig');
             }
         };
         
-        window.togglePassword = () => {
-            const pwd = document.getElementById('loginPassword');
-            pwd.type = pwd.type === 'password' ? 'text' : 'password';
-        };
-        
-        window.showRegister = () => {
-            alert('Registrierung: Bitte wenden Sie sich an Ihren Admin oder nutzen Sie den Demo-Zugang.');
-        };
-        
-        window.openNewAssetModal = () => {
-            const name = prompt('Name/Kennzeichen:');
-            if (!name) return;
-            const category = prompt('Kategorie (Transport & Flotte / Bau & Maschinen / Elektro & Werkzeug / Gebäude & Sicherheit / Sonstiges):', 'Sonstiges');
-            const pruefart = prompt('Prüfart:');
-            const intervall = parseInt(prompt('Intervall (Monate):', '12'));
-            const letztePruefung = prompt('Letzte Prüfung (YYYY-MM-DD):');
-            const standort = prompt('Standort:');
-            const pruefer = prompt('Zugewiesener Prüfer:');
-            
-            const naechstesDatum = new Date(letztePruefung);
-            naechstesDatum.setMonth(naechstesDatum.getMonth() + intervall);
-            
-            const newAsset = {
-                id: Date.now().toString(),
-                name, category, pruefart, intervall, letztePruefung,
-                naechstesDatum: naechstesDatum.toISOString().split('T')[0],
-                standort, pruefer, foto: null
-            };
-            assets.push(newAsset);
-            localStorage.setItem('assets', JSON.stringify(assets));
-            render();
-        };
-        
-        window.addPhoto = (id) => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.onchange = (e) => {
-                const file = e.target.files[0];
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const asset = assets.find(a => a.id === id);
-                    asset.foto = event.target.result;
-                    localStorage.setItem('assets', JSON.stringify(assets));
-                    render();
-                };
-                reader.readAsDataURL(file);
-            };
-            input.click();
-        };
-        
-        window.showFullImage = (src) => {
-            const win = window.open();
-            win.document.write(`<img src="${src}" style="max-width:100%; max-height:100%; margin:auto; display:block;">`);
-        };
-        
-        window.showPlans = () => {
-            alert('📋 Unsere Pläne:\n\n• Basis (49€/Monat) – Kerngeräte\n• Professional (99€/Monat) – Alle Features\n• Enterprise (150€/Monat) – Multi-Mandant + API\n\n14 Tage kostenlos testen! Kontaktieren Sie uns für Upgrade.');
-        };
-        
-        // Initial theme
-        if (currentTheme === 'dark') document.body.classList.add('dark');
         render();
     </script>
 </body>
