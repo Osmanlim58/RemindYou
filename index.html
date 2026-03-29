@@ -1,49 +1,228 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RemindYou</title>
+    <title>Remindly - Prüffristen Management</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .status-red { background: #fee2e2; color: #dc2626; }
+        .status-orange { background: #ffedd5; color: #f97316; }
+        .status-green { background: #dcfce7; color: #22c55e; }
+        .dark { background: #1a1a2e; color: white; }
+        .dark .bg-white { background: #16213e !important; }
+        .dark .bg-gray-100 { background: #0f0f23 !important; }
+        .dark .text-gray-700 { color: #ccc !important; }
+        .dark .border { border-color: #333 !important; }
+    </style>
 </head>
-<body class="bg-gray-100 p-4">
-    <div id="root" class="max-w-4xl mx-auto"></div>
+<body class="bg-gray-100">
+    <div id="app"></div>
     <script>
-        let assets = JSON.parse(localStorage.getItem('assets') || '[{"id":1,"name":"Gabelstapler","status":"orange","date":"2026-04-15","pruefart":"TÜV","pruefer":"Klaus"},{"id":2,"name":"Feuerlöscher","status":"red","date":"2025-03-01","pruefart":"Brandschutz","pruefer":"Max"}]');
+        // ========== KOMPLETTE REMINDLY APP - ALTE VERSION ==========
         
-        function save() { localStorage.setItem('assets', JSON.stringify(assets)); }
+        // Daten
+        let currentUser = null;
+        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        let assets = JSON.parse(localStorage.getItem('assets') || '[]');
+        let auditLog = JSON.parse(localStorage.getItem('auditLog') || '[]');
+        
+        // Admin erstellen falls leer
+        if(users.length === 0) {
+            users.push({ email: "cguler23@gmail.com", password: "Remindly2026!", role: "admin" });
+            localStorage.setItem('users', JSON.stringify(users));
+        }
+        
+        // Beispiel Assets
+        if(assets.length === 0) {
+            assets = [
+                { id: 1, name: "Gabelstapler B12", category: "Fuhrpark", pruefart: "TÜV", intervall: 12, letztePruefung: "2025-03-15", naechstesDatum: "2026-03-15", standort: "Halle A", pruefer: "Klaus Prüfer" },
+                { id: 2, name: "Feuerlöscher", category: "Gebäude", pruefart: "Brandschutz", intervall: 12, letztePruefung: "2024-06-01", naechstesDatum: "2025-06-01", standort: "Flur EG", pruefer: "Max Mustermann" },
+                { id: 3, name: "Nassschrubber", category: "Elektro", pruefart: "DGUV V3", intervall: 12, letztePruefung: "2025-04-01", naechstesDatum: "2026-04-01", standort: "Lager 1", pruefer: "Klaus Prüfer" }
+            ];
+            localStorage.setItem('assets', JSON.stringify(assets));
+        }
+        
+        function getStatus(naechstesDatum) {
+            let today = new Date();
+            let next = new Date(naechstesDatum);
+            let diff = Math.ceil((next - today) / (1000 * 60 * 60 * 24));
+            if(diff < 0) return 'red';
+            if(diff <= 14) return 'orange';
+            return 'green';
+        }
+        
+        function logAction(userId, action) {
+            auditLog.push({ userId, action, timestamp: new Date().toISOString(), ipHash: "demo" });
+            localStorage.setItem('auditLog', JSON.stringify(auditLog));
+        }
         
         function render() {
-            let red = assets.filter(a=>a.status==='red').length;
-            let orange = assets.filter(a=>a.status==='orange').length;
-            let green = assets.filter(a=>a.status==='green').length;
-            
-            document.getElementById('root').innerHTML = `
-                <h1 class="text-3xl font-bold text-green-600">💡✓ RemindYou</h1>
-                <p class="text-gray-500 mb-4">Deine Fristen im Fokus</p>
-                <div class="grid grid-cols-3 gap-3 mb-4">
-                    <div class="bg-red-100 p-3 rounded text-center"><b>${red}</b><br>Überfällig</div>
-                    <div class="bg-orange-100 p-3 rounded text-center"><b>${orange}</b><br>Bald fällig</div>
-                    <div class="bg-green-100 p-3 rounded text-center"><b>${green}</b><br>In Ordnung</div>
+            let html = '';
+            if(!currentUser) {
+                html = renderLogin();
+            } else {
+                html = renderDashboard();
+            }
+            document.getElementById('app').innerHTML = html;
+        }
+        
+        function renderLogin() {
+            return `
+                <div class="min-h-screen flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
+                        <div class="text-center mb-6">
+                            <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <span class="text-3xl">🔍</span>
+                            </div>
+                            <h1 class="text-3xl font-bold text-gray-800">Remindly</h1>
+                            <p class="text-gray-500">Deine Fristen im Fokus</p>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 mb-2">E-Mail</label>
+                            <input type="email" id="loginEmail" class="w-full border rounded-lg p-2" value="cguler23@gmail.com">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 mb-2">Passwort</label>
+                            <input type="password" id="loginPassword" class="w-full border rounded-lg p-2" value="Remindly2026!">
+                        </div>
+                        <button onclick="doLogin()" class="w-full bg-green-600 text-white py-2 rounded-lg">Anmelden</button>
+                        <div class="text-center text-sm text-gray-400 mt-4">
+                            Demo: cguler23@gmail.com / Remindly2026!
+                        </div>
+                    </div>
                 </div>
-                <button onclick="neu()" class="bg-green-600 text-white px-4 py-2 rounded mb-3">+ Neues Gerät</button>
-                <div class="bg-white rounded shadow">
-                    <table class="w-full">
-                        <tr class="bg-gray-200"><th class="p-2">Gerät</th><th>Status</th><th>Prüfart</th><th>Prüfer</th></tr>
-                        ${assets.map(a => `<tr><td class="p-2">${a.name}</td><td class="${a.status==='red'?'text-red-600':a.status==='orange'?'text-orange-600':'text-green-600'}">${a.status}</td><td>${a.pruefart}</td><td>${a.pruefer}</td></tr>`).join('')}
-                    </table>
-                </div>
-                <div class="text-center text-sm text-gray-400 mt-4">Login: cguler23@gmail.com / Remindly2026!</div>
             `;
         }
         
-        window.neu = () => {
-            let name = prompt("Geräte Name:");
-            if(name) {
-                assets.push({id:Date.now(), name, status:"green", date:"2026-12-31", pruefart:"Neu", pruefer:"Admin"});
-                save();
+        function renderDashboard() {
+            let redCount = assets.filter(a => getStatus(a.naechstesDatum) === 'red').length;
+            let orangeCount = assets.filter(a => getStatus(a.naechstesDatum) === 'orange').length;
+            let greenCount = assets.filter(a => getStatus(a.naechstesDatum) === 'green').length;
+            
+            return `
+                <div class="p-4 max-w-6xl mx-auto">
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h1 class="text-3xl font-bold text-green-600">Remindly</h1>
+                            <p class="text-gray-500">Deine Fristen im Fokus</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="toggleTheme()" class="p-2 rounded bg-gray-200">🌙</button>
+                            <button onclick="doLogout()" class="p-2 rounded bg-red-500 text-white">Logout</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Ampelkarten -->
+                    <div class="grid grid-cols-3 gap-4 mb-6">
+                        <div class="bg-red-100 p-4 rounded-xl text-center cursor-pointer" onclick="filterByStatus('red')">
+                            <div class="text-3xl font-bold text-red-600">${redCount}</div>
+                            <div class="text-red-600">Überfällig</div>
+                        </div>
+                        <div class="bg-orange-100 p-4 rounded-xl text-center cursor-pointer" onclick="filterByStatus('orange')">
+                            <div class="text-3xl font-bold text-orange-600">${orangeCount}</div>
+                            <div class="text-orange-600">Bald fällig</div>
+                        </div>
+                        <div class="bg-green-100 p-4 rounded-xl text-center cursor-pointer" onclick="filterByStatus('green')">
+                            <div class="text-3xl font-bold text-green-600">${greenCount}</div>
+                            <div class="text-green-600">In Ordnung</div>
+                        </div>
+                    </div>
+                    
+                    <button onclick="showNewAssetModal()" class="bg-green-600 text-white px-4 py-2 rounded mb-4">+ Neues Gerät</button>
+                    
+                    <div class="bg-white rounded-xl shadow overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="p-3 text-left">Gerät</th>
+                                    <th class="p-3 text-left">Status</th>
+                                    <th class="p-3 text-left">Prüfart</th>
+                                    <th class="p-3 text-left">Nächstes Datum</th>
+                                    <th class="p-3 text-left">Standort</th>
+                                    <th class="p-3 text-left">Prüfer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${assets.map(asset => {
+                                    let status = getStatus(asset.naechstesDatum);
+                                    let statusText = status === 'red' ? '🔴 Dringend' : status === 'orange' ? '🟠 Bald' : '🟢 Ok';
+                                    let statusClass = status === 'red' ? 'text-red-600' : status === 'orange' ? 'text-orange-600' : 'text-green-600';
+                                    return `
+                                        <tr class="border-t">
+                                            <td class="p-3">${asset.name}</td>
+                                            <td class="p-3 ${statusClass}">${statusText}</td>
+                                            <td class="p-3">${asset.pruefart}</td>
+                                            <td class="p-3">${asset.naechstesDatum}</td>
+                                            <td class="p-3">${asset.standort || '-'}</td>
+                                            <td class="p-3">${asset.pruefer || '-'}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        window.doLogin = () => {
+            let email = document.getElementById('loginEmail').value;
+            let pwd = document.getElementById('loginPassword').value;
+            let user = users.find(u => u.email === email && u.password === pwd);
+            if(user) {
+                currentUser = user;
+                logAction(user.email, 'login');
                 render();
+            } else {
+                alert('E-Mail oder Passwort ungültig');
             }
+        };
+        
+        window.doLogout = () => {
+            currentUser = null;
+            render();
+        };
+        
+        window.showNewAssetModal = () => {
+            let name = prompt('Name/Kennzeichen:');
+            if(!name) return;
+            let pruefart = prompt('Prüfart (z.B. TÜV, DGUV V3, Brandschutz):');
+            let intervall = parseInt(prompt('Intervall (Monate):', '12'));
+            let letztePruefung = prompt('Letzte Prüfung (YYYY-MM-DD):');
+            let standort = prompt('Standort:');
+            let pruefer = prompt('Zugewiesener Prüfer:');
+            
+            let next = new Date(letztePruefung);
+            next.setMonth(next.getMonth() + intervall);
+            
+            let newAsset = {
+                id: Date.now(),
+                name: name,
+                category: "Allgemein",
+                pruefart: pruefart,
+                intervall: intervall,
+                letztePruefung: letztePruefung,
+                naechstesDatum: next.toISOString().split('T')[0],
+                standort: standort,
+                pruefer: pruefer
+            };
+            assets.push(newAsset);
+            localStorage.setItem('assets', JSON.stringify(assets));
+            logAction(currentUser.email, `asset.created.${newAsset.id}`);
+            render();
+        };
+        
+        window.filterByStatus = (status) => {
+            let filtered = assets.filter(a => getStatus(a.naechstesDatum) === status);
+            alert(`${status === 'red' ? 'Überfällige' : status === 'orange' ? 'Bald fällige' : 'In Ordnung'} Geräte: ${filtered.length} Stück`);
+        };
+        
+        window.toggleTheme = () => {
+            document.body.classList.toggle('dark');
         };
         
         render();
