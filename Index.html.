@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Remindly – Fristen im Griff</title>
+    <!-- Tailwind + Font Awesome + QR Code Bibliothek -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs2-fix/dist/qrcode.min.js"></script>
+    <!-- Tesseract.js für OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.0/dist/tesseract.min.js"></script>
+    <style>
+        body.dark { background-color: #111827; color: #e5e7eb; }
+        body.dark .bg-white { background-color: #1f2937; }
+        body.dark .bg-gray-50 { background-color: #111827; }
+        body.dark .border-gray-200 { border-color: #374151; }
+        body.dark .text-gray-700 { color: #d1d5db; }
+        .transition { transition: all 0.2s ease; }
+        .qr-code canvas { max-width: 100px; height: auto; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans antialiased">
+<div id="app" class="min-h-screen"></div>
+
+<script>
+    // ======================== GLOBAL DATA & HELPERS ========================
+    let currentUser = null;
+    let users = JSON.parse(localStorage.getItem('users') || '[]');
+    let assets = JSON.parse(localStorage.getItem('assets') || '[]');
+    let auditLog = JSON.parse(localStorage.getItem('auditLog') || '[]');
+    let budgets = JSON.parse(localStorage.getItem('budgets') || '[]'); // { assetId, amount, description, date }
+    let recurringOrders = JSON.parse(localStorage.getItem('recurringOrders') || '[]');
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+
+    // Demo-User (Admin, normaler User, externer Prüfer)
+    if (users.length === 0) {
+        users = [
+            { id: 'admin1', email: 'admin@remindly.de', password: 'admin123', role: 'admin', name: 'Admin' },
+            { id: 'user1', email: 'user@remindly.de', password: 'user123', role: 'user', name: 'Max Mustermann' },
+            { id: 'ext1', email: 'extern@firma.de', password: 'extern123', role: 'external', name: 'Externe Firma GmbH', mandantId: 'ext1' }
+        ];
+        localStorage.setItem('users', JSON.stringify(users));
+    }
+
+    // Demo-Geräte mit Zuweisungen
+    if (assets.length === 0) {
+        assets = [
+            { id: '1', name: 'Gabelstapler B12', category: 'Fuhrpark', pruefart: 'TÜV', intervallMonate: 12, letztePruefung: '2025-03-15', naechstesDatum: '2026-03-15', standort: 'Halle A', prueferIds: ['admin1'], kostenstelle: 'Logistik', foto: null, dokumente: [] },
+            { id: '2', name: 'Feuerlöscher EG', category: 'Gebäudesicherheit', pruefart: 'Brandschutz', intervallMonate: 12, letztePruefung: '2024-06-01', naechstesDatum: '2025-06-01', standort: 'Flur EG', prueferIds: ['admin1'], kostenstelle: 'Brandschutz', foto: null, dokumente: [] },
+            { id: '3', name: 'Nassschrubber X7', category: 'Elektrogeräte', pruefart: 'DGUV V3', intervallMonate: 12, letztePruefung: '2025-04-01', naechstesDatum: '2026-04-01', standort: 'Lager 1', prueferIds: ['user1'], kostenstelle: 'Reinigung', foto: null, dokumente: [] },
+            { id: '4', name: 'Schädlingsbekämpfung Außen', category: 'Schädlingsbekämpfung', pruefart: 'Köderwechsel', intervallMonate: 1, letztePruefung: '2025-03-01', naechstesDatum: '2025-04-01', standort: 'Gelände', prueferIds: ['ext1'], kostenstelle: 'Externe', foto: null, dokumente: [] }
+        ];
+        localStorage.setItem('assets', JSON.stringify(assets));
+    }
+
+    // Demo-Budgeteinträge
+    if (budgets.length === 0) {
+        budgets = [
+            { assetId: '1', amount: 450, description: 'TÜV Gebühr', date: '2025-03-15' },
+            { assetId: '1', amount: 1200, description: 'Reparatur', date: '2025-02-10' }
+        ];
+        localStorage.setItem('budgets', JSON.stringify(budgets));
+    }
+
+    // Demo-Wiederholungsaufträge
+    if (recurringOrders.length === 0) {
+        recurringOrders = [
+            { id: 'ro1', assetId: '4', externalCompanyId: 'ext1', intervalMonths: 1, lastTriggered: '2025-03-01', active: true, description: 'Monatlicher Köderwechsel' }
+        ];
+        localStorage.setItem('recurringOrders', JSON.stringify(recurringOrders));
+    }
+
+    function saveData() {
+        localStorage.setItem('users', JSON.stringify(users));
+        localStorage.setItem('assets', JSON.stringify(assets));
+        localStorage.setItem('auditLog', JSON.stringify(auditLog));
+        localStorage.setItem('budgets', JSON.stringify(budgets));
+        localStorage.setItem('recurringOrders', JSON.stringify(recurringOrders));
+        localStorage.setItem('darkMode', darkMode);
+    }
+
+    function addLog(userId, action, details = '') {
+        auditLog.push({
+            id: Date.now(),
+            userId: userId,
+            action: action,
+            details: details,
+            timestamp: new Date().toISOString(),
+            ip: '127.0.0.1' // Demo
+        });
+        saveData();
+    }
+
+    function getStatus(naechstesDatum) {
+        const today = new Date();
+        const next = new Date(naechstesDatum);
+        const diffDays = Math.ceil((next - today) / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) return 'red';
+        if (diffDays <= 14) return 'orange';
+        return 'green';
+    }
+
+    // Hilfsfunktion: Prüfen, ob User Zugriff auf Asset hat (Rolle)
+    function userHasAccess(asset) {
+        if (!currentUser) return false;
+        if (currentUser.role === 'admin') return true;
+        if (currentUser.role === 'user') return asset.prueferIds.includes(currentUser.id);
+        if (currentUser.role === 'external') return asset.prueferIds.includes(currentUser.id);
+        return false;
+    }
+
+    if (darkMode) document.body.classList.add('dark');
+
+    // ======================== RENDER FUNCTIONS ========================
+    function render() {
+        const app = document.getElementById('app');
+        if (!currentUser) {
+            app.innerHTML = renderLogin();
+        } else {
+            app.innerHTML = renderDashboard();
+            attachEventListeners();
+            // QR-Codes nach dem Rendern initialisieren
+            setTimeout(() => {
+                document.querySelectorAll('.qr-code-container').forEach((el, idx) => {
+                    const assetId = el.getAttribute('data-id');
+                    const url = `https://remindly.app/asset/${assetId}`;
+                    new QRCode(el, { text: url, width: 80, height: 80 });
+                });
+            }, 100);
+        }
+    }
+
+    function renderLogin() {
+        return `
+            <div class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+                <div class="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden">
+                    <div class="bg-gradient-to-r from-green-600 to-emerald-700 py-6 px-8 text-white text-center">
+                        <div class="text-4xl mb-2">✅📋</div>
+                        <h1 class="text-3xl font-bold">Remindly</h1>
+                        <p class="text-green-100 mt-1">Professionelles Prüffristen‑management.</p>
+                    </div>
+                    <div class="p-8">
+                        <h2 class="text-xl font-semibold text-gray-800 dark:text-white mb-4">Willkommen zurück</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-gray-700 dark:text-gray-300 mb-1">E-Mail</label>
+                                <input type="email" id="loginEmail" class="w-full border rounded-lg px-4 py-2 dark:bg-gray-700" placeholder="name@firma.de">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 dark:text-gray-300 mb-1">Passwort</label>
+                                <input type="password" id="loginPassword" class="w-full border rounded-lg px-4 py-2 dark:bg-gray-700" placeholder="********">
+                            </div>
+                            <button onclick="login()" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg">Anmelden</button>
+                            <div class="text-center text-sm text-gray-500 mt-4">
+                                <strong>Demo-Zugänge:</strong><br>
+                                Admin: admin@remindly.de / admin123<br>
+                                User: user@remindly.de / user123<br>
+                                Extern: extern@firma.de / extern123
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderDashboard() {
+        // Gefilterte Assets basierend auf Rolle
+        let visibleAssets = assets.filter(a => userHasAccess(a));
+        const redCount = visibleAssets.filter(a => getStatus(a.naechstesDatum) === 'red').length;
+        const orangeCount = visibleAssets.filter(a => getStatus(a.naechstesDatum) === 'orange').length;
+        const greenCount = visibleAssets.filter(a => getStatus(a.naechstesDatum) === 'green').length;
+
+        // Wiederholungsaufträge für externe Firmen anzeigen (nur wenn Rolle external)
+        let recurringHtml = '';
+        if (currentUser.role === 'external') {
+            const myOrders = recurringOrders.filter(o => o.externalCompanyId === currentUser.id);
+            recurringHtml = `
+                <div class="mt-8 bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+                    <h2 class="text-xl font-semibold mb-3"><i class="fas fa-repeat"></i> Wiederholungsaufträge</h2>
+                    ${myOrders.length ? `
+                        <div class="space-y-2">
+                            ${myOrders.map(order => {
+                                const asset = assets.find(a => a.id === order.assetId);
+                                return `<div class="border-b py-2 flex justify-between items-center">
+                                    <span><strong>${asset?.name}</strong> – ${order.description}</span>
+                                    <span class="text-sm">Intervall: ${order.intervalMonths} Monat(e) | nächste Fälligkeit: ${order.lastTriggered ? new Date(new Date(order.lastTriggered).setMonth(new Date(order.lastTriggered).getMonth() + order.intervalMonths)).toISOString().slice(0,10) : 'demnächst'}</span>
+                                    <button onclick="triggerOrder('${order.id}')" class="bg-blue-500 text-white px-2 py-1 rounded text-sm">Jetzt ausführen</button>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    ` : '<p class="text-gray-500">Keine aktiven Wiederholungsaufträge.</p>'}
+                </div>
+            `;
+        }
+
+        return `
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <div class="flex flex-wrap justify-between items-center mb-6">
+                    <div>
+                        <h1 class="text-3xl font-bold text-green-600"><i class="fas fa-clipboard-list"></i> Remindly</h1>
+                        <p class="text-gray-500 dark:text-gray-400">Deine Fristen im Fokus</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm">Hallo, ${currentUser.name}</span>
+                        <button onclick="toggleDarkMode()" class="p-2 rounded-full bg-gray-200 dark:bg-gray-700">
+                            <i class="fas ${darkMode ? 'fa-sun' : 'fa-moon'}"></i>
+                        </button>
+                        <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg">Abmelden</button>
+                    </div>
+                </div>
+
+                <!-- Ampelkarten -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-red-100 dark:bg-red-900/30 p-4 rounded-xl text-center cursor-pointer" onclick="setStatusFilter('red')">
+                        <div class="text-3xl font-bold text-red-600">${redCount}</div>
+                        <div class="text-red-600">Überfällig</div>
+                    </div>
+                    <div class="bg-orange-100 dark:bg-orange-900/30 p-4 rounded-xl text-center cursor-pointer" onclick="setStatusFilter('orange')">
+                        <div class="text-3xl font-bold text-orange-600">${orangeCount}</div>
+                        <div class="text-orange-600">Bald fällig</div>
+                    </div>
+                    <div class="bg-green-100 dark:bg-green-900/30 p-4 rounded-xl text-center cursor-pointer" onclick="setStatusFilter('green')">
+                        <div class="text-3xl font-bold text-green-600">${greenCount}</div>
+                        <div class="text-green-600">In Ordnung</div>
+                    </div>
+                </div>
+
+                <!-- Aktionen -->
+                <div class="flex flex-wrap gap-3 mb-5">
+                    <input type="text" id="searchInput" placeholder="🔍 Suchen..." class="flex-1 border rounded-lg px-4 py-2 dark:bg-gray-800">
+                    <button onclick="showNewAssetModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg"><i class="fas fa-plus"></i> Neues Gerät</button>
+                    <button onclick="exportCSV()" class="bg-blue-600 text-white px-4 py-2 rounded-lg"><i class="fas fa-download"></i> CSV</button>
+                    <button onclick="printPDF()" class="bg-purple-600 text-white px-4 py-2 rounded-lg"><i class="fas fa-print"></i> PDF</button>
+                </div>
+
+                <!-- Geräteliste -->
+                <div id="assetListContainer" class="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead class="bg-gray-50 dark:bg-gray-700">
+                                <tr><th class="px-4 py-3">Gerät</th><th>Status</th><th>Prüfart</th><th>Nächstes Datum</th><th>Standort</th><th>Prüfer</th><th>QR</th><th>Foto</th><th>Budget</th><th>Aktionen</th></tr>
+                            </thead>
+                            <tbody id="assetTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Budget-Tracking (für Admin sichtbar) -->
+                ${currentUser.role === 'admin' ? `
+                <div class="mt-8 bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+                    <h2 class="text-xl font-semibold mb-3"><i class="fas fa-chart-line"></i> Budget-Tracking</h2>
+                    <div id="budgetSummary"></div>
+                </div>
+                ` : ''}
+
+                ${recurringHtml}
+
+                <!-- Audit-Log (nur Admin) -->
+                ${currentUser.role === 'admin' ? `
+                <div class="mt-8">
+                    <h2 class="text-xl font-semibold mb-3"><i class="fas fa-history"></i> Audit-Log</h2>
+                    <div class="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden max-h-60 overflow-y-auto">
+                        <table class="min-w-full text-sm">
+                            <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
+                                <tr><th class="px-3 py-2">Zeit</th><th>Benutzer</th><th>Aktion</th><th>Details</th></tr>
+                            </thead>
+                            <tbody id="auditLogBody">${auditLog.slice().reverse().slice(0, 30).map(log => `
+                                <tr class="border-t"><td class="px-3 py-2">${new Date(log.timestamp).toLocaleString()}</td><td>${log.userId}</td><td>${log.action}</td><td>${log.details || ''}</td></tr>
+                            `).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    function refreshAssetList() {
+        const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
+        let filtered = assets.filter(a => userHasAccess(a));
+        if (searchTerm) {
+            filtered = filtered.filter(a => a.name.toLowerCase().includes(searchTerm) || a.pruefart?.toLowerCase().includes(searchTerm));
+        }
+        if (window.activeStatusFilter && window.activeStatusFilter !== 'all') {
+            filtered = filtered.filter(a => getStatus(a.naechstesDatum) === window.activeStatusFilter);
+        }
+
+        const tbody = document.getElementById('assetTableBody');
+        if (!tbody) return;
+        tbody.innerHTML = filtered.map(asset => {
+            const status = getStatus(asset.naechstesDatum);
+            const statusText = status === 'red' ? '🔴 Dringend' : status === 'orange' ? '🟠 Bald' : '🟢 Ok';
+            const statusClass = status === 'red' ? 'text-red-600' : status === 'orange' ? 'text-orange-600' : 'text-green-600';
+            const assetBudgets = budgets.filter(b => b.assetId === asset.id);
+            const totalBudget = assetBudgets.reduce((sum, b) => sum + b.amount, 0);
+            return `
+                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="px-4 py-3">${asset.name}${asset.foto ? '<i class="fas fa-camera ml-1 text-gray-400"></i>' : ''}</td>
+                    <td class="px-4 py-3 ${statusClass}">${statusText}</td>
+                    <td class="px-4 py-3">${asset.pruefart}</td>
+                    <td class="px-4 py-3">${asset.naechstesDatum}</td>
+                    <td class="px-4 py-3">${asset.standort || '-'}</td>
+                    <td class="px-4 py-3">${asset.prueferIds.map(id => users.find(u => u.id === id)?.name || id).join(', ')}</td>
+                    <td class="px-4 py-3"><div class="qr-code-container" data-id="${asset.id}"></div></td>
+                    <td class="px-4 py-3">
+                        ${asset.foto ? `<img src="${asset.foto}" class="w-10 h-10 rounded object-cover cursor-pointer" onclick="showImage('${asset.foto}')">` : '<button onclick="uploadPhoto(\''+asset.id+'\')" class="text-blue-500"><i class="fas fa-camera"></i> Foto</button>'}
+                    </td>
+                    <td class="px-4 py-3">💰 ${totalBudget.toFixed(2)} € <button onclick="addBudgetEntry('${asset.id}')" class="text-green-600 ml-2"><i class="fas fa-plus-circle"></i></button></td>
+                    <td class="px-4 py-3">
+                        <button onclick="editAsset('${asset.id}')" class="text-blue-600 mr-2"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteAsset('${asset.id}')" class="text-red-600"><i class="fas fa-trash-alt"></i></button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Budget-Zusammenfassung für Admin
+        if (currentUser.role === 'admin') {
+            const budgetSummaryDiv = document.getElementById('budgetSummary');
+            if (budgetSummaryDiv) {
+                const totalExpenses = budgets.reduce((s, b) => s + b.amount, 0);
+                budgetSummaryDiv.innerHTML = `<div class="text-lg">Gesamtausgaben: ${totalExpenses.toFixed(2)} €</div>`;
+            }
+        }
+    }
+
+    function attachEventListeners() {
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            searchInput.removeEventListener('input', refreshAssetList);
+            searchInput.addEventListener('input', refreshAssetList);
+        }
+        refreshAssetList();
+    }
+
+    // ======================== GLOBALE FUNKTIONEN ========================
+    window.login = () => {
+        const email = document.getElementById('loginEmail').value.trim();
+        const pwd = document.getElementById('loginPassword').value;
+        const user = users.find(u => u.email === email && u.password === pwd);
+        if (user) {
+            currentUser = user;
+            addLog(user.id, 'login', `Erfolgreich angemeldet`);
+            render();
+        } else {
+            alert('E-Mail oder Passwort ungültig');
+        }
+    };
+
+    window.logout = () => {
+        if (currentUser) addLog(currentUser.id, 'logout', 'Abgemeldet');
+        currentUser = null;
+        window.activeStatusFilter = 'all';
+        render();
+    };
+
+    window.toggleDarkMode = () => {
+        darkMode = !darkMode;
+        if (darkMode) document.body.classList.add('dark');
+        else document.body.classList.remove('dark');
+        localStorage.setItem('darkMode', darkMode);
+        render();
+    };
+
+    window.setStatusFilter = (status) => {
+        window.activeStatusFilter = (window.activeStatusFilter === status ? 'all' : status);
+        refreshAssetList();
+    };
+
+    window.showNewAssetModal = () => {
+        const name = prompt('Name/Kennzeichen:');
+        if (!name) return;
+        const pruefart = prompt('Prüfart (z.B. TÜV):', 'TÜV');
+        const intervall = parseInt(prompt('Intervall (Monate):', '12'));
+        const letztePruefung = prompt('Letzte Prüfung (YYYY-MM-DD):', new Date().toISOString().slice(0,10));
+        const standort = prompt('Standort:');
+        const kostenstelle = prompt('Kostenstelle:');
+        const nextDate = new Date(letztePruefung);
+        nextDate.setMonth(nextDate.getMonth() + intervall);
+        const newAsset = {
+            id: Date.now().toString(),
+            name, pruefart, intervallMonate: intervall, letztePruefung,
+            naechstesDatum: nextDate.toISOString().slice(0,10),
+            standort, kostenstelle, prueferIds: [currentUser.id],
+            foto: null, dokumente: []
+        };
+        assets.push(newAsset);
+        saveData();
+        addLog(currentUser.id, 'asset.create', `Neues Gerät "${name}" angelegt`);
+        render();
+    };
+
+    window.editAsset = (id) => {
+        const asset = assets.find(a => a.id === id);
+        if (!asset) return;
+        const newName = prompt('Name:', asset.name);
+        if (newName) asset.name = newName;
+        const newPruefart = prompt('Prüfart:', asset.pruefart);
+        if (newPruefart) asset.pruefart = newPruefart;
+        const newIntervall = parseInt(prompt('Intervall (Monate):', asset.intervallMonate));
+        if (!isNaN(newIntervall)) asset.intervallMonate = newIntervall;
+        const newLetzte = prompt('Letzte Prüfung:', asset.letztePruefung);
+        if (newLetzte) {
+            asset.letztePruefung = newLetzte;
+            const next = new Date(newLetzte);
+            next.setMonth(next.getMonth() + asset.intervallMonate);
+            asset.naechstesDatum = next.toISOString().slice(0,10);
+        }
+        const newStandort = prompt('Standort:', asset.standort);
+        if (newStandort) asset.standort = newStandort;
+        saveData();
+        addLog(currentUser.id, 'asset.update', `Gerät "${asset.name}" bearbeitet`);
+        render();
+    };
+
+    window.deleteAsset = (id) => {
+        if (confirm('Gerät löschen?')) {
+            const asset = assets.find(a => a.id === id);
+            assets = assets.filter(a => a.id !== id);
+            saveData();
+            addLog(currentUser.id, 'asset.delete', `Gerät "${asset?.name}" gelöscht`);
+            render();
+        }
+    };
+
+    // Foto-Upload mit OCR
+    window.uploadPhoto = (id) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const imageDataUrl = event.target.result;
+                    const asset = assets.find(a => a.id === id);
+                    if (asset) {
+                        asset.foto = imageDataUrl;
+                        saveData();
+                        addLog(currentUser.id, 'asset.photo', `Foto zu "${asset.name}" hochgeladen`);
+                        render();
+                    }
+                    // OCR erkennen
+                    const { data: { text } } = await Tesseract.recognize(file, 'deu');
+                    if (text.trim()) {
+                        alert('OCR erkannt:\n' + text + '\n\nKann als Prüfart oder Intervall übernommen werden? (Demo)');
+                        // Beispiel: extrahiere Zahl für Intervall
+                        const match = text.match(/(\d+)\s*Monat/);
+                        if (match && asset) {
+                            const newInterval = parseInt(match[1]);
+                            if (!isNaN(newInterval) && confirm(`Intervall auf ${newInterval} Monate setzen?`)) {
+                                asset.intervallMonate = newInterval;
+                                const next = new Date(asset.letztePruefung);
+                                next.setMonth(next.getMonth() + newInterval);
+                                asset.naechstesDatum = next.toISOString().slice(0,10);
+                                saveData();
+                                render();
+                            }
+                        }
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+        input.click();
+    };
+
+    window.addBudgetEntry = (assetId) => {
+        const amount = parseFloat(prompt('Betrag (€):', '0'));
+        if (isNaN(amount)) return;
+        const description = prompt('Beschreibung:', 'Wartung');
+        const date = new Date().toISOString().slice(0,10);
+        budgets.push({ assetId, amount, description, date });
+        saveData();
+        addLog(currentUser.id, 'budget.add', `${amount}€ für ${description} (Asset ${assetId})`);
+        render();
+    };
+
+    window.triggerOrder = (orderId) => {
+        const order = recurringOrders.find(o => o.id === orderId);
+        if (order) {
+            order.lastTriggered = new Date().toISOString().slice(0,10);
+            saveData();
+            alert(`Auftrag ausgeführt: ${order.description}`);
+            addLog(currentUser.id, 'recurring.trigger', `Auftrag ${order.id} ausgeführt`);
+            render();
+        }
+    };
+
+    window.exportCSV = () => {
+        let csv = "Name,Prüfart,Letzte Prüfung,Nächstes Datum,Standort,Kostenstelle,Status\n";
+        assets.filter(a => userHasAccess(a)).forEach(a => {
+            const status = getStatus(a.naechstesDatum);
+            csv += `"${a.name}","${a.pruefart}","${a.letztePruefung}","${a.naechstesDatum}","${a.standort || ''}","${a.kostenstelle || ''}","${status}"\n`;
+        });
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'remindly_export.csv';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    };
+
+    window.printPDF = () => {
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write('<html><head><title>Remindly Bericht</title><style>table {border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:8px} th{background:#f2f2f2}</style></head><body>');
+        printWindow.document.write('<h1>Remindly Prüfbericht</h1><table>');
+        printWindow.document.write('<tr><th>Gerät</th><th>Prüfart</th><th>Nächstes Datum</th><th>Status</th></tr>');
+        assets.filter(a => userHasAccess(a)).forEach(a => {
+            const status = getStatus(a.naechstesDatum);
+            printWindow.document.write(`<tr><td>${a.name}</td><td>${a.pruefart}</td><td>${a.naechstesDatum}</td><td>${status}</td></tr>`);
+        });
+        printWindow.document.write('</table></body></html>');
+        printWindow.document.close();
+        printWindow.print();
+    };
+
+    window.showImage = (src) => {
+        const win = window.open();
+        win.document.write(`<img src="${src}" style="max-width:100%;margin:auto;display:block;">`);
+    };
+
+    // PWA Service Worker (optional, integriert)
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(console.log);
+    }
+
+    // Start
+    render();
+</script>
+</body>
+</html>
